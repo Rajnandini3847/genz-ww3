@@ -6,6 +6,7 @@ import GovBanner from "@/components/GovBanner";
 import DoomscrollTicker from "@/components/DoomscrollTicker";
 import RealNewsBanner from "@/components/RealNewsBanner";
 import DraftLetterGenerator from "@/components/DraftLetterGenerator";
+import WarfieldCanvas from "@/components/WarfieldCanvas";
 import CharacterSelect from "@/components/CharacterSelect";
 import TrenchTalkTranslator from "@/components/TrenchTalkTranslator";
 import SurvivalCalculator from "@/components/SurvivalCalculator";
@@ -231,7 +232,9 @@ function PageContent() {
   const { isMil } = useTheme();
 
   return (
-    <div className={isMil ? "mil-mode bg-white text-[#1b1b1b]" : "bg-[#030712] text-white noise"}>
+    <div className={isMil ? "mil-mode bg-white text-[#1b1b1b]" : "bg-[#030712] text-white noise relative"}>
+      {!isMil && <WarfieldCanvas />}
+      <div className="relative z-10">
       <ModeToggle />
 
       {/* .gov banner — only in military mode */}
@@ -290,6 +293,7 @@ function PageContent() {
 
       {/* Bottom ticker — only chaos */}
       {!isMil && <DoomscrollTicker />}
+      </div>
     </div>
   );
 }
