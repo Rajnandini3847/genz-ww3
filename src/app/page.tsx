@@ -7,6 +7,7 @@ import DoomscrollTicker from "@/components/DoomscrollTicker";
 import RealNewsBanner from "@/components/RealNewsBanner";
 import DraftLetterGenerator from "@/components/DraftLetterGenerator";
 import WarfieldCanvas from "@/components/WarfieldCanvas";
+import ArsenalGuide from "@/components/ArsenalGuide";
 import CharacterSelect from "@/components/CharacterSelect";
 import TrenchTalkTranslator from "@/components/TrenchTalkTranslator";
 import SurvivalCalculator from "@/components/SurvivalCalculator";
@@ -39,6 +40,7 @@ function ChaosHero() {
         <nav className="flex flex-wrap justify-center gap-2 mt-8">
           {[
             { href: "#news", label: "Real News", color: "#ef4444" },
+            { href: "#arsenal", label: "Arsenal Guide", color: "#ff6b35" },
             { href: "#draft", label: "Draft Letter", color: "#FF2D78" },
             { href: "#characters", label: "Character Select", color: "#4D4DFF" },
             { href: "#translate", label: "Trench Talk", color: "#00FF66" },
@@ -92,6 +94,7 @@ function MilitaryHero() {
         <div className="max-w-5xl mx-auto px-4 flex gap-0 overflow-x-auto">
           {[
             { href: "#news", label: "Situation Reports" },
+            { href: "#arsenal", label: "Global Arsenal" },
             { href: "#draft", label: "Draft Registration" },
             { href: "#characters", label: "Personnel Classification" },
             { href: "#translate", label: "Communications" },
@@ -265,6 +268,12 @@ function PageContent() {
             : "space-y-16 md:space-y-24 py-16 md:py-24 px-4"
         }
       >
+        <Section id="arsenal" milTitle="Military Equipment Reference — Global Arsenal Database">
+          <ArsenalGuide />
+        </Section>
+
+        {!isMil && <div className="max-w-4xl mx-auto border-t-2 border-gray-800" />}
+
         <Section id="draft" milTitle="Selective Service — Draft Registration Form">
           <DraftLetterGenerator />
         </Section>
