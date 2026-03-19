@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Merriweather:wght@400;700;900&family=Source+Sans+3:wght@400;600;700;900&display=swap');
 
 :root {
   --background: #030712;
@@ -21,7 +22,53 @@ body {
   color: var(--foreground);
 }
 
-/* Scrolling ticker */
+/* ═══════════════════════════════════════════
+   MILITARY MODE — .gov / USWDS style
+   ═══════════════════════════════════════════ */
+
+.mil-mode {
+  --background: #ffffff;
+  --foreground: #1b1b1b;
+  --pink: #d83933;
+  --green: #00a91c;
+  --blue: #005ea2;
+  --yellow: #ffbe2e;
+  background: #ffffff !important;
+  color: #1b1b1b !important;
+  font-family: 'Source Sans 3', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+}
+
+.mil-mode * {
+  border-color: #dfe1e2;
+}
+
+.mil-mode .noise::after {
+  display: none;
+}
+
+.mil-mode .glitch-text {
+  animation: none !important;
+  text-shadow: none !important;
+}
+
+.mil-mode ::selection {
+  background: #005ea2;
+  color: #fff;
+}
+
+.mil-mode ::-webkit-scrollbar-thumb {
+  background: #dfe1e2;
+}
+
+/* Military headings use Merriweather serif */
+.mil-mode h1, .mil-mode h2, .mil-mode h3 {
+  font-family: 'Merriweather', Georgia, 'Times New Roman', serif !important;
+}
+
+/* ═══════════════════════════════════════════
+   CHAOS MODE (default) animations
+   ═══════════════════════════════════════════ */
+
 @keyframes scroll {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
@@ -30,12 +77,10 @@ body {
 .animate-scroll {
   animation: scroll 45s linear infinite;
 }
-
 .animate-scroll:hover {
   animation-play-state: paused;
 }
 
-/* Glitch text */
 @keyframes glitch {
   0%, 100% { text-shadow: 3px 0 var(--pink), -3px 0 var(--blue); }
   25% { text-shadow: -3px 0 var(--pink), 3px 0 var(--blue); }
@@ -47,7 +92,6 @@ body {
   animation: glitch 2s infinite;
 }
 
-/* Noise overlay */
 .noise::after {
   content: '';
   position: fixed;
@@ -57,12 +101,12 @@ body {
   z-index: 100;
 }
 
-/* Scrollbar */
+/* ═══════════════════════════════════════════ */
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #333; }
 
-/* Line clamp utility */
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -70,14 +114,10 @@ body {
   overflow: hidden;
 }
 
-/* Selection */
 ::selection {
   background: var(--pink);
   color: #000;
 }
-
-/* Handwritten font for draft card */
-@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
 
 .handwritten {
   font-family: 'Caveat', cursive;
