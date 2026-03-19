@@ -1,525 +1,374 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect } from "react";
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-// ═══ TYPES ═══
-type VehicleType = "tank" | "jet" | "heli" | "drone" | "ship" | "missile";
-
-interface Vec2 { x: number; y: number; }
-
-interface Vehicle {
-  type: VehicleType;
-  pos: Vec2;
-  vel: Vec2;
-  size: number;
-  angle: number;
-  life: number;
-  maxLife: number;
-  trail: Vec2[];
-  color: string;
-}
-
-interface Particle {
-  pos: Vec2;
-  vel: Vec2;
-  life: number;
-  maxLife: number;
-  size: number;
-  color: string;
-}
-
-interface Explosion {
-  pos: Vec2;
-  life: number;
-  maxLife: number;
-  particles: Particle[];
-}
-
-// ═══ COLORS ═══
-const COLORS = {
-  radar: "#00FF6640",
-  radarLine: "#00FF6618",
-  tank: "#ff2d78",
-  jet: "#4d4dff",
-  heli: "#00ff66",
-  drone: "#eeff00",
-  ship: "#ff6b35",
-  missile: "#ff4444",
-  grid: "#ffffff06",
-  explosion: ["#ff2d78", "#ff6b35", "#eeff00", "#ffffff", "#4d4dff"],
+const MODEL_URLS = {
+  tank: "https://static.poly.pizza/ba4513d6-e5c6-4a4b-a027-2eb7097d6516.glb",
+  jet: "https://static.poly.pizza/19d58465-dafb-4df0-a3b8-b0500bd9ed4b.glb",
+  heli: "https://static.poly.pizza/7899f9de-bd5d-452f-9248-a96d447ff133.glb",
+  missile: "https://static.poly.pizza/bae77cff-57c6-4cb4-8ccf-7bc61a9b1d20.glb",
 };
 
-function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
-function dist(a: Vec2, b: Vec2) { return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2); }
+interface Vehicle {
+  mesh: THREE.Group;
+  type: keyof typeof MODEL_URLS;
+  velocity: THREE.Vector3;
+  rotSpeed: number;
+  life: number;
+  maxLife: number;
+}
+
+function rand(min: number, max: number) {
+  return Math.random() * (max - min) + min;
+}
 
 export default function WarfieldCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const vehiclesRef = useRef<Vehicle[]>([]);
-  const explosionsRef = useRef<Explosion[]>([]);
-  const mouseRef = useRef<Vec2>({ x: -1000, y: -1000 });
-  const radarAngleRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sceneRef = useRef<any>(null);
   const frameRef = useRef(0);
-  const dimRef = useRef({ w: 0, h: 0 });
-
-  const spawnVehicle = useCallback((w: number, h: number): Vehicle => {
-    const types: VehicleType[] = ["tank", "tank", "jet", "jet", "heli", "drone", "drone", "ship"];
-    const type = types[Math.floor(Math.random() * types.length)];
-    const edge = Math.floor(Math.random() * 4);
-    let pos: Vec2, vel: Vec2, size: number;
-
-    switch (type) {
-      case "tank":
-        size = rand(6, 10);
-        pos = edge < 2 ? { x: edge === 0 ? -20 : w + 20, y: rand(h * 0.5, h) } : { x: rand(0, w), y: edge === 2 ? -20 : h + 20 };
-        vel = { x: rand(-0.4, 0.4), y: rand(-0.1, 0.1) };
-        if (pos.x < 0) vel.x = Math.abs(vel.x) + 0.2;
-        if (pos.x > w) vel.x = -Math.abs(vel.x) - 0.2;
-        break;
-      case "jet":
-        size = rand(5, 8);
-        pos = { x: edge % 2 === 0 ? -30 : w + 30, y: rand(0, h * 0.4) };
-        vel = { x: pos.x < 0 ? rand(2, 4) : rand(-4, -2), y: rand(-0.5, 0.5) };
-        break;
-      case "heli":
-        size = rand(7, 11);
-        pos = { x: rand(0, w), y: rand(-30, -10) };
-        vel = { x: rand(-0.5, 0.5), y: rand(0.2, 0.6) };
-        break;
-      case "drone":
-        size = rand(3, 5);
-        pos = { x: rand(0, w), y: rand(0, h) };
-        vel = { x: rand(-1, 1), y: rand(-1, 1) };
-        break;
-      case "ship":
-        size = rand(10, 16);
-        pos = { x: edge % 2 === 0 ? -40 : w + 40, y: rand(h * 0.85, h) };
-        vel = { x: pos.x < 0 ? rand(0.15, 0.35) : rand(-0.35, -0.15), y: 0 };
-        break;
-      default:
-        size = 5;
-        pos = { x: 0, y: 0 };
-        vel = { x: 1, y: 0 };
-    }
-
-    return {
-      type, pos, vel, size,
-      angle: Math.atan2(vel.y, vel.x),
-      life: 0, maxLife: rand(400, 1200),
-      trail: [],
-      color: COLORS[type],
-    };
-  }, []);
-
-  const spawnExplosion = useCallback((pos: Vec2, intensity: number) => {
-    const particles: Particle[] = [];
-    const count = Math.floor(intensity * 12);
-    for (let i = 0; i < count; i++) {
-      const angle = rand(0, Math.PI * 2);
-      const speed = rand(0.5, 3) * intensity;
-      particles.push({
-        pos: { ...pos },
-        vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-        life: 0, maxLife: rand(20, 50),
-        size: rand(1, 3),
-        color: COLORS.explosion[Math.floor(Math.random() * COLORS.explosion.length)],
-      });
-    }
-    explosionsRef.current.push({ pos: { ...pos }, life: 0, maxLife: 60, particles });
-  }, []);
-
-  const fireMissile = useCallback((from: Vehicle, to: Vehicle) => {
-    const dx = to.pos.x - from.pos.x;
-    const dy = to.pos.y - from.pos.y;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    const speed = 2.5;
-    vehiclesRef.current.push({
-      type: "missile",
-      pos: { ...from.pos },
-      vel: { x: (dx / d) * speed, y: (dy / d) * speed },
-      size: 2,
-      angle: Math.atan2(dy, dx),
-      life: 0, maxLife: d / speed + 20,
-      trail: [],
-      color: COLORS.missile,
-    });
-  }, []);
-
-  // ═══ DRAW FUNCTIONS ═══
-  const drawTank = (ctx: CanvasRenderingContext2D, v: Vehicle) => {
-    ctx.save();
-    ctx.translate(v.pos.x, v.pos.y);
-    ctx.rotate(v.angle);
-    // Body
-    ctx.fillStyle = v.color + "80";
-    ctx.fillRect(-v.size, -v.size * 0.4, v.size * 2, v.size * 0.8);
-    // Turret
-    ctx.fillStyle = v.color + "cc";
-    ctx.fillRect(-v.size * 0.3, -v.size * 0.25, v.size * 0.6, v.size * 0.5);
-    // Barrel
-    ctx.fillStyle = v.color;
-    ctx.fillRect(v.size * 0.3, -v.size * 0.08, v.size * 0.8, v.size * 0.16);
-    // Treads
-    ctx.strokeStyle = v.color + "40";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(-v.size, -v.size * 0.5, v.size * 2, v.size);
-    ctx.restore();
-  };
-
-  const drawJet = (ctx: CanvasRenderingContext2D, v: Vehicle) => {
-    ctx.save();
-    ctx.translate(v.pos.x, v.pos.y);
-    ctx.rotate(v.angle);
-    ctx.fillStyle = v.color + "90";
-    // Fuselage
-    ctx.beginPath();
-    ctx.moveTo(v.size * 1.2, 0);
-    ctx.lineTo(-v.size * 0.8, -v.size * 0.15);
-    ctx.lineTo(-v.size * 0.8, v.size * 0.15);
-    ctx.closePath();
-    ctx.fill();
-    // Wings
-    ctx.fillStyle = v.color + "60";
-    ctx.beginPath();
-    ctx.moveTo(v.size * 0.1, 0);
-    ctx.lineTo(-v.size * 0.4, -v.size * 0.8);
-    ctx.lineTo(-v.size * 0.6, -v.size * 0.6);
-    ctx.lineTo(-v.size * 0.3, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(v.size * 0.1, 0);
-    ctx.lineTo(-v.size * 0.4, v.size * 0.8);
-    ctx.lineTo(-v.size * 0.6, v.size * 0.6);
-    ctx.lineTo(-v.size * 0.3, 0);
-    ctx.closePath();
-    ctx.fill();
-    // Exhaust glow
-    ctx.fillStyle = v.color + "30";
-    ctx.beginPath();
-    ctx.arc(-v.size, 0, v.size * 0.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  };
-
-  const drawHeli = (ctx: CanvasRenderingContext2D, v: Vehicle) => {
-    ctx.save();
-    ctx.translate(v.pos.x, v.pos.y);
-    // Body
-    ctx.fillStyle = v.color + "70";
-    ctx.beginPath();
-    ctx.ellipse(0, 0, v.size * 0.6, v.size * 0.3, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Tail
-    ctx.fillStyle = v.color + "50";
-    ctx.fillRect(-v.size * 0.8, -v.size * 0.06, v.size * 0.7, v.size * 0.12);
-    // Rotor (spinning)
-    const rotorAngle = v.life * 0.3;
-    ctx.strokeStyle = v.color + "90";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(rotorAngle) * v.size, Math.sin(rotorAngle) * v.size * 0.15);
-    ctx.lineTo(Math.cos(rotorAngle + Math.PI) * v.size, Math.sin(rotorAngle + Math.PI) * v.size * 0.15);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(rotorAngle + Math.PI / 2) * v.size * 0.8, Math.sin(rotorAngle + Math.PI / 2) * v.size * 0.12);
-    ctx.lineTo(Math.cos(rotorAngle + Math.PI * 1.5) * v.size * 0.8, Math.sin(rotorAngle + Math.PI * 1.5) * v.size * 0.12);
-    ctx.stroke();
-    ctx.restore();
-  };
-
-  const drawDrone = (ctx: CanvasRenderingContext2D, v: Vehicle) => {
-    ctx.save();
-    ctx.translate(v.pos.x, v.pos.y);
-    // X frame
-    ctx.strokeStyle = v.color + "80";
-    ctx.lineWidth = 1;
-    const r = v.size;
-    ctx.beginPath();
-    ctx.moveTo(-r, -r); ctx.lineTo(r, r);
-    ctx.moveTo(r, -r); ctx.lineTo(-r, r);
-    ctx.stroke();
-    // Rotors
-    const pulse = Math.sin(v.life * 0.5) * 0.3 + 0.7;
-    ctx.fillStyle = v.color + Math.floor(pulse * 80).toString(16).padStart(2, "0");
-    for (const [dx, dy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
-      ctx.beginPath();
-      ctx.arc(dx, dy, v.size * 0.35, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Center light
-    ctx.fillStyle = v.color;
-    ctx.beginPath();
-    ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  };
-
-  const drawShip = (ctx: CanvasRenderingContext2D, v: Vehicle) => {
-    ctx.save();
-    ctx.translate(v.pos.x, v.pos.y);
-    ctx.rotate(v.angle);
-    ctx.fillStyle = v.color + "60";
-    // Hull
-    ctx.beginPath();
-    ctx.moveTo(v.size, 0);
-    ctx.lineTo(v.size * 0.6, -v.size * 0.25);
-    ctx.lineTo(-v.size * 0.8, -v.size * 0.2);
-    ctx.lineTo(-v.size, 0);
-    ctx.lineTo(-v.size * 0.8, v.size * 0.2);
-    ctx.lineTo(v.size * 0.6, v.size * 0.25);
-    ctx.closePath();
-    ctx.fill();
-    // Superstructure
-    ctx.fillStyle = v.color + "90";
-    ctx.fillRect(-v.size * 0.2, -v.size * 0.35, v.size * 0.5, v.size * 0.15);
-    // Antenna
-    ctx.strokeStyle = v.color + "70";
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(0, -v.size * 0.35);
-    ctx.lineTo(0, -v.size * 0.55);
-    ctx.stroke();
-    ctx.restore();
-  };
-
-  const drawMissile = (ctx: CanvasRenderingContext2D, v: Vehicle) => {
-    // Trail
-    for (let i = 0; i < v.trail.length; i++) {
-      const alpha = (i / v.trail.length) * 0.4;
-      ctx.fillStyle = `rgba(255,68,68,${alpha})`;
-      ctx.beginPath();
-      ctx.arc(v.trail[i].x, v.trail[i].y, 1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Head
-    ctx.save();
-    ctx.translate(v.pos.x, v.pos.y);
-    ctx.rotate(v.angle);
-    ctx.fillStyle = "#ff4444";
-    ctx.beginPath();
-    ctx.moveTo(3, 0);
-    ctx.lineTo(-2, -1.5);
-    ctx.lineTo(-2, 1.5);
-    ctx.closePath();
-    ctx.fill();
-    // Glow
-    ctx.fillStyle = "#ff444440";
-    ctx.beginPath();
-    ctx.arc(0, 0, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  };
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const w = window.innerWidth;
-      const h = document.documentElement.scrollHeight;
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
-      ctx.scale(dpr, dpr);
-      dimRef.current = { w, h };
-    };
+    // ═══ SCENE SETUP ═══
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x030712, 0.0015);
 
-    resize();
-    const resizeObs = new ResizeObserver(resize);
-    resizeObs.observe(document.body);
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera.position.set(0, 120, 200);
+    camera.lookAt(0, 0, 0);
 
-    const handleMouse = (e: MouseEvent) => {
-      mouseRef.current = { x: e.clientX, y: e.clientY + window.scrollY };
-    };
-    window.addEventListener("mousemove", handleMouse);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0);
+    container.appendChild(renderer.domElement);
 
-    // Spawn initial vehicles
-    const { w, h } = dimRef.current;
-    for (let i = 0; i < 18; i++) {
-      const v = spawnVehicle(w, h);
-      v.pos = { x: rand(0, w), y: rand(0, h) };
-      vehiclesRef.current.push(v);
+    // ═══ LIGHTING ═══
+    const ambientLight = new THREE.AmbientLight(0x334455, 1.5);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xff2d78, 0.8);
+    dirLight.position.set(50, 100, 50);
+    scene.add(dirLight);
+
+    const dirLight2 = new THREE.DirectionalLight(0x4d4dff, 0.5);
+    dirLight2.position.set(-50, 80, -50);
+    scene.add(dirLight2);
+
+    const pointLight = new THREE.PointLight(0x00ff66, 0.6, 500);
+    pointLight.position.set(0, 50, 0);
+    scene.add(pointLight);
+
+    // ═══ GROUND GRID ═══
+    const gridHelper = new THREE.GridHelper(800, 40, 0x00ff66, 0x00ff66);
+    gridHelper.position.y = -2;
+    (gridHelper.material as THREE.Material).opacity = 0.06;
+    (gridHelper.material as THREE.Material).transparent = true;
+    scene.add(gridHelper);
+
+    // ═══ RADAR SWEEP (flat disc on ground) ═══
+    const radarGeo = new THREE.CircleGeometry(400, 64);
+    const radarMat = new THREE.ShaderMaterial({
+      transparent: true,
+      uniforms: { uAngle: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uAngle;
+        varying vec2 vUv;
+        void main() {
+          vec2 center = vUv - 0.5;
+          float angle = atan(center.y, center.x);
+          float diff = mod(angle - uAngle + 6.2832, 6.2832);
+          float sweep = smoothstep(0.0, 0.5, diff) * (1.0 - smoothstep(0.5, 1.0, diff));
+          float dist = length(center);
+          float ring = smoothstep(0.48, 0.5, dist) * (1.0 - smoothstep(0.5, 0.52, dist));
+          float alpha = sweep * 0.08 * (1.0 - dist * 2.0) + ring * 0.05;
+          gl_FragColor = vec4(0.0, 1.0, 0.4, alpha);
+        }
+      `,
+    });
+    const radarMesh = new THREE.Mesh(radarGeo, radarMat);
+    radarMesh.rotation.x = -Math.PI / 2;
+    radarMesh.position.y = -1;
+    scene.add(radarMesh);
+
+    // ═══ EXPLOSION PARTICLES ═══
+    const PARTICLE_COUNT = 600;
+    const particlePositions = new Float32Array(PARTICLE_COUNT * 3);
+    const particleVelocities = new Float32Array(PARTICLE_COUNT * 3);
+    const particleLifetimes = new Float32Array(PARTICLE_COUNT);
+    const particleColors = new Float32Array(PARTICLE_COUNT * 3);
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particlePositions[i * 3] = 0;
+      particlePositions[i * 3 + 1] = -1000; // hidden below
+      particlePositions[i * 3 + 2] = 0;
+      particleLifetimes[i] = 0;
+      // Random warm colors
+      const colors = [[1, 0.18, 0.47], [1, 0.42, 0.21], [0.93, 1, 0], [0.3, 0.3, 1]];
+      const c = colors[Math.floor(Math.random() * colors.length)];
+      particleColors[i * 3] = c[0];
+      particleColors[i * 3 + 1] = c[1];
+      particleColors[i * 3 + 2] = c[2];
     }
 
-    let running = true;
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
+    particleGeo.setAttribute("color", new THREE.BufferAttribute(particleColors, 3));
 
-    const frame = () => {
-      if (!running) return;
-      const { w, h } = dimRef.current;
-      ctx.clearRect(0, 0, w, h);
+    const particleMat = new THREE.PointsMaterial({
+      size: 2.5,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
 
-      // ─── RADAR SWEEP ───
-      radarAngleRef.current += 0.005;
-      const cx = w / 2;
-      const cy = h * 0.35;
-      const radarR = Math.max(w, h);
-      const ra = radarAngleRef.current;
+    const particles = new THREE.Points(particleGeo, particleMat);
+    scene.add(particles);
 
-      ctx.save();
-      ctx.globalAlpha = 0.15;
-      const grad = ctx.createConicGradient(ra, cx, cy);
-      grad.addColorStop(0, "transparent");
-      grad.addColorStop(0.03, "#00ff6612");
-      grad.addColorStop(0.06, "transparent");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radarR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      // Radar line
-      ctx.strokeStyle = COLORS.radarLine;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + Math.cos(ra) * radarR, cy + Math.sin(ra) * radarR);
-      ctx.stroke();
-
-      // ─── GRID ───
-      ctx.strokeStyle = COLORS.grid;
-      ctx.lineWidth = 0.5;
-      const gs = 80;
-      for (let x = 0; x < w; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-      for (let y = 0; y < h; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-
-      // ─── UPDATE + DRAW VEHICLES ───
-      const vehicles = vehiclesRef.current;
-      const mouse = mouseRef.current;
-
-      for (let i = vehicles.length - 1; i >= 0; i--) {
-        const v = vehicles[i];
-        v.life++;
-
-        // Mouse repulsion
-        const md = dist(v.pos, mouse);
-        if (md < 120 && v.type !== "missile") {
-          const force = (120 - md) / 120 * 0.8;
-          const dx = v.pos.x - mouse.x;
-          const dy = v.pos.y - mouse.y;
-          const d = Math.sqrt(dx * dx + dy * dy) || 1;
-          v.vel.x += (dx / d) * force;
-          v.vel.y += (dy / d) * force;
-        }
-
-        // Drone wobble
-        if (v.type === "drone") {
-          v.vel.x += rand(-0.1, 0.1);
-          v.vel.y += rand(-0.1, 0.1);
-          v.vel.x *= 0.98;
-          v.vel.y *= 0.98;
-        }
-
-        // Speed limits
-        const maxSpeed = v.type === "jet" ? 5 : v.type === "missile" ? 3 : v.type === "drone" ? 1.5 : 1;
-        const speed = Math.sqrt(v.vel.x ** 2 + v.vel.y ** 2);
-        if (speed > maxSpeed) {
-          v.vel.x = (v.vel.x / speed) * maxSpeed;
-          v.vel.y = (v.vel.y / speed) * maxSpeed;
-        }
-
-        v.pos.x += v.vel.x;
-        v.pos.y += v.vel.y;
-        v.angle = Math.atan2(v.vel.y, v.vel.x);
-
-        // Trail for missiles and jets
-        if (v.type === "missile" || v.type === "jet") {
-          v.trail.push({ ...v.pos });
-          if (v.trail.length > (v.type === "missile" ? 20 : 8)) v.trail.shift();
-        }
-
-        // Remove if off screen or expired
-        const margin = 60;
-        if (v.pos.x < -margin || v.pos.x > w + margin || v.pos.y < -margin || v.pos.y > h + margin || v.life > v.maxLife) {
-          if (v.type === "missile") {
-            spawnExplosion(v.pos, 0.6);
-          }
-          vehicles.splice(i, 1);
-          continue;
-        }
-
-        // Draw
-        switch (v.type) {
-          case "tank": drawTank(ctx, v); break;
-          case "jet": drawJet(ctx, v); break;
-          case "heli": drawHeli(ctx, v); break;
-          case "drone": drawDrone(ctx, v); break;
-          case "ship": drawShip(ctx, v); break;
-          case "missile": drawMissile(ctx, v); break;
-        }
-      }
-
-      // ─── MISSILE FIRING ───
-      if (Math.random() < 0.008 && vehicles.length > 3) {
-        const shooters = vehicles.filter((v) => v.type !== "missile" && v.type !== "drone");
-        const targets = vehicles.filter((v) => v.type !== "missile");
-        if (shooters.length > 0 && targets.length > 1) {
-          const from = shooters[Math.floor(Math.random() * shooters.length)];
-          const to = targets.filter((t) => t !== from)[Math.floor(Math.random() * (targets.length - 1))];
-          if (to && dist(from.pos, to.pos) < 400) {
-            fireMissile(from, to);
-          }
-        }
-      }
-
-      // ─── EXPLOSIONS ───
-      const explosions = explosionsRef.current;
-      for (let i = explosions.length - 1; i >= 0; i--) {
-        const ex = explosions[i];
-        ex.life++;
-        if (ex.life > ex.maxLife) { explosions.splice(i, 1); continue; }
-
-        // Ring
-        const ringProgress = ex.life / ex.maxLife;
-        ctx.strokeStyle = `rgba(255,45,120,${(1 - ringProgress) * 0.3})`;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(ex.pos.x, ex.pos.y, ringProgress * 30, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Particles
-        for (let j = ex.particles.length - 1; j >= 0; j--) {
-          const p = ex.particles[j];
-          p.life++;
-          if (p.life > p.maxLife) { ex.particles.splice(j, 1); continue; }
-          p.pos.x += p.vel.x;
-          p.pos.y += p.vel.y;
-          p.vel.x *= 0.96;
-          p.vel.y *= 0.96;
-          const alpha = 1 - p.life / p.maxLife;
-          ctx.fillStyle = p.color + Math.floor(alpha * 200).toString(16).padStart(2, "0");
-          ctx.beginPath();
-          ctx.arc(p.pos.x, p.pos.y, p.size * (1 - p.life / p.maxLife * 0.5), 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
-      // ─── SPAWN NEW VEHICLES ───
-      if (vehicles.filter((v) => v.type !== "missile").length < 20 && Math.random() < 0.02) {
-        vehicles.push(spawnVehicle(w, h));
-      }
-
-      frameRef.current = requestAnimationFrame(frame);
+    // ═══ STATE ═══
+    const state = {
+      scene, camera, renderer,
+      vehicles: [] as Vehicle[],
+      templates: new Map<string, THREE.Group>(),
+      mouse: new THREE.Vector2(0, 0),
+      radarAngle: 0,
+      radarMesh,
+      gridHelper,
+      particles,
+      particlePositions,
+      particleVelocities,
+      particleLifetimes,
+      clock: new THREE.Clock(),
     };
+    sceneRef.current = state;
 
-    frameRef.current = requestAnimationFrame(frame);
+    // ═══ LOAD MODELS ═══
+    const loader = new GLTFLoader();
+    const loadPromises = Object.entries(MODEL_URLS).map(([key, url]) =>
+      new Promise<void>((resolve) => {
+        loader.load(
+          url,
+          (gltf) => {
+            const model = gltf.scene;
+            // Normalize model size
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const targetSize = key === "tank" ? 14 : key === "jet" ? 12 : key === "heli" ? 12 : 6;
+            const scale = targetSize / maxDim;
+            model.scale.setScalar(scale);
+            // Apply emissive tint
+            model.traverse((child) => {
+              if ((child as THREE.Mesh).isMesh) {
+                const mesh = child as THREE.Mesh;
+                if (mesh.material && (mesh.material as THREE.MeshStandardMaterial).emissive) {
+                  const mat = (mesh.material as THREE.MeshStandardMaterial).clone();
+                  mat.emissive = new THREE.Color(
+                    key === "tank" ? 0xff2d78 : key === "jet" ? 0x4d4dff : key === "heli" ? 0x00ff66 : 0xeeff00
+                  );
+                  mat.emissiveIntensity = 0.15;
+                  mesh.material = mat;
+                }
+              }
+            });
+            state.templates.set(key, model);
+            resolve();
+          },
+          undefined,
+          () => resolve() // fail silently
+        );
+      })
+    );
+
+    Promise.all(loadPromises).then(() => {
+      // Spawn initial vehicles
+      for (let i = 0; i < 10; i++) {
+        spawnVehicle(state);
+      }
+    });
+
+    // ═══ SPAWN VEHICLE ═══
+    function spawnVehicle(s: typeof state) {
+      const types = Object.keys(MODEL_URLS).filter((k) => k !== "missile") as (keyof typeof MODEL_URLS)[];
+      const type = types[Math.floor(Math.random() * types.length)];
+      const template = s.templates.get(type);
+      if (!template) return;
+
+      const mesh = template.clone();
+      const spread = 350;
+
+      // Spawn from edges
+      const edge = Math.floor(Math.random() * 4);
+      let x: number, z: number, vx: number, vz: number;
+      const speed = type === "jet" ? rand(1.2, 2.0) : type === "heli" ? rand(0.3, 0.6) : rand(0.2, 0.5);
+
+      if (edge === 0) { x = -spread; z = rand(-spread, spread); vx = speed; vz = rand(-0.3, 0.3); }
+      else if (edge === 1) { x = spread; z = rand(-spread, spread); vx = -speed; vz = rand(-0.3, 0.3); }
+      else if (edge === 2) { x = rand(-spread, spread); z = -spread; vx = rand(-0.3, 0.3); vz = speed; }
+      else { x = rand(-spread, spread); z = spread; vx = rand(-0.3, 0.3); vz = -speed; }
+
+      const y = type === "jet" ? rand(40, 80) : type === "heli" ? rand(20, 50) : 0;
+      mesh.position.set(x, y, z);
+
+      const velocity = new THREE.Vector3(vx, 0, vz);
+
+      s.scene.add(mesh);
+      s.vehicles.push({
+        mesh, type, velocity,
+        rotSpeed: type === "heli" ? 0.1 : 0,
+        life: 0, maxLife: rand(300, 700),
+      });
+    }
+
+    // ═══ SPAWN EXPLOSION ═══
+    function spawnExplosion(s: typeof state, pos: THREE.Vector3) {
+      let spawned = 0;
+      for (let i = 0; i < PARTICLE_COUNT && spawned < 30; i++) {
+        if (s.particleLifetimes[i] <= 0) {
+          const angle = rand(0, Math.PI * 2);
+          const elev = rand(-Math.PI / 3, Math.PI / 3);
+          const speed = rand(1, 5);
+          s.particlePositions[i * 3] = pos.x;
+          s.particlePositions[i * 3 + 1] = pos.y;
+          s.particlePositions[i * 3 + 2] = pos.z;
+          s.particleVelocities[i * 3] = Math.cos(angle) * Math.cos(elev) * speed;
+          s.particleVelocities[i * 3 + 1] = Math.sin(elev) * speed + 1;
+          s.particleVelocities[i * 3 + 2] = Math.sin(angle) * Math.cos(elev) * speed;
+          s.particleLifetimes[i] = rand(40, 80);
+          spawned++;
+        }
+      }
+    }
+
+    // ═══ MOUSE ═══
+    const onMouseMove = (e: MouseEvent) => {
+      state.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      state.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    };
+    window.addEventListener("mousemove", onMouseMove);
+
+    // ═══ RESIZE ═══
+    const onResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+    window.addEventListener("resize", onResize);
+
+    // ═══ ANIMATE ═══
+    let running = true;
+    let frame = 0;
+
+    function animate() {
+      if (!running) return;
+      frameRef.current = requestAnimationFrame(animate);
+      frame++;
+      const s = sceneRef.current;
+      if (!s) return;
+
+      const dt = Math.min(s.clock.getDelta(), 0.05);
+
+      // Camera gentle sway
+      s.camera.position.x = Math.sin(frame * 0.001) * 30;
+      s.camera.position.z = 200 + Math.cos(frame * 0.0007) * 20;
+      s.camera.lookAt(0, 10, 0);
+
+      // Radar sweep
+      s.radarAngle += dt * 0.8;
+      (s.radarMesh.material as THREE.ShaderMaterial).uniforms.uAngle.value = s.radarAngle;
+
+      // Update vehicles
+      for (let i = s.vehicles.length - 1; i >= 0; i--) {
+        const v = s.vehicles[i];
+        v.life++;
+        v.mesh.position.add(v.velocity);
+
+        // Face direction of movement
+        const lookTarget = v.mesh.position.clone().add(v.velocity);
+        v.mesh.lookAt(lookTarget);
+
+        // Heli hover wobble
+        if (v.type === "heli") {
+          v.mesh.position.y += Math.sin(v.life * 0.05) * 0.1;
+        }
+
+        // Remove if too far or expired
+        if (v.life > v.maxLife || v.mesh.position.length() > 500) {
+          if (v.type !== "missile" && Math.random() < 0.3) {
+            spawnExplosion(s, v.mesh.position.clone());
+          }
+          s.scene.remove(v.mesh);
+          s.vehicles.splice(i, 1);
+        }
+      }
+
+      // Spawn new vehicles
+      const nonMissiles = s.vehicles.filter((v: Vehicle) => v.type !== "missile").length;
+      if (nonMissiles < 12 && Math.random() < 0.02) {
+        spawnVehicle(s);
+      }
+
+      // Random explosions at vehicle positions
+      if (frame % 90 === 0 && s.vehicles.length > 0) {
+        const target = s.vehicles[Math.floor(Math.random() * s.vehicles.length)];
+        spawnExplosion(s, target.mesh.position.clone());
+      }
+
+      // Update particles
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        if (s.particleLifetimes[i] > 0) {
+          s.particleLifetimes[i]--;
+          s.particlePositions[i * 3] += s.particleVelocities[i * 3];
+          s.particlePositions[i * 3 + 1] += s.particleVelocities[i * 3 + 1];
+          s.particlePositions[i * 3 + 2] += s.particleVelocities[i * 3 + 2];
+          s.particleVelocities[i * 3 + 1] -= 0.05; // gravity
+          s.particleVelocities[i * 3] *= 0.98;
+          s.particleVelocities[i * 3 + 2] *= 0.98;
+        } else {
+          s.particlePositions[i * 3 + 1] = -1000;
+        }
+      }
+      s.particles.geometry.attributes.position.needsUpdate = true;
+
+      // Point light color pulse
+      pointLight.color.setHSL((frame * 0.002) % 1, 0.8, 0.5);
+      pointLight.position.x = Math.sin(frame * 0.01) * 100;
+      pointLight.position.z = Math.cos(frame * 0.01) * 100;
+
+      s.renderer.render(s.scene, s.camera);
+    }
+
+    animate();
 
     return () => {
       running = false;
       cancelAnimationFrame(frameRef.current);
-      window.removeEventListener("mousemove", handleMouse);
-      resizeObs.disconnect();
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("resize", onResize);
+      container.removeChild(renderer.domElement);
+      renderer.dispose();
     };
-  }, [spawnVehicle, spawnExplosion, fireMissile]);
+  }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
+    <div
+      ref={containerRef}
       className="fixed inset-0 pointer-events-none z-0"
-      style={{ opacity: 0.6 }}
+      style={{ opacity: 0.7 }}
     />
   );
 }
